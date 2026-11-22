@@ -1,6 +1,27 @@
 import SwiftUI
 import AppKit
 
+struct BatteryTimeRemainingLabel: View {
+    let seconds: TimeInterval?
+
+    var body: some View {
+        if let seconds {
+            let duration = Duration.seconds(seconds).formatted(
+                .units(allowed: [.hours, .minutes], width: .narrow)
+            )
+            Text("~\(duration)")
+                .monospacedDigit()
+                .help("Estimated battery time remaining from macOS; varies with workload.")
+                .accessibilityLabel("Estimated battery time remaining")
+                .accessibilityValue(duration)
+        } else {
+            Text("—")
+                .help("macOS is calculating the battery time remaining.")
+                .accessibilityLabel("Battery time remaining unavailable")
+        }
+    }
+}
+
 struct BatteryStatusLabel: View {
     let state: BatteryRuntimeState?
     let trackerRunning: Bool

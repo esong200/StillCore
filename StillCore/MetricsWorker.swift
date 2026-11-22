@@ -54,7 +54,7 @@ final class MetricsWorker: @unchecked Sendable {
     private var processShowing: UUID?
 
     init(interval: Duration,
-         onSample: @escaping @MainActor @Sendable (Metrics, ProcessSnapshot?) -> Void,
+         onSample: @escaping @MainActor @Sendable (Metrics, ProcessSnapshot?, Float?) -> Void,
          onError: @escaping @MainActor @Sendable (String) -> Void) {
         schedule = MetricsSchedule(interval: interval)
 
@@ -65,10 +65,11 @@ final class MetricsWorker: @unchecked Sendable {
                 while true {
                     self.schedule.waitForNextSample()
                     let metrics = try sampler.metrics()
+                    let batteryTemperature = BatteryStatus.readTemperatureCelsius()
                     let (showing, processes) = self.sampleProcesses()
                     DispatchQueue.main.async {
                         let isCurrent = self.processShowing == showing
-                        onSample(metrics, isCurrent ? processes : nil)
+                        onSample(metrics, isCurrent ? processes : nil, batteryTemperature)
                     }
                 }
             } catch {

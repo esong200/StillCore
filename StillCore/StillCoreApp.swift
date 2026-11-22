@@ -98,6 +98,7 @@ final class AppDependencies: ObservableObject {
     private(set) var socInfo: SocInfo?
     private var metricsWorker: MetricsWorker?
     private var previousMetrics: Metrics?
+    private(set) var batteryTemperatureCelsius: Float?
     private let metricsSubject = PassthroughSubject<(metrics: Metrics, processes: ProcessSnapshot?), Never>()
     @Published private(set) var chartHistoryResetRevision = 0
 
@@ -127,7 +128,8 @@ final class AppDependencies: ObservableObject {
         metricsError = ""
         metricsWorker = MetricsWorker(
             interval: .milliseconds(metricsIntervalMs),
-            onSample: { [weak self] metrics, processes in
+            onSample: { [weak self] metrics, processes, batteryTemperature in
+                self?.batteryTemperatureCelsius = batteryTemperature
                 self?.publishMetrics(metrics, processes: processes)
             },
             onError: { [weak self] message in
@@ -368,6 +370,7 @@ private enum MetricsChartDefinitions {
         title: "Temperature",
         unitLabel: "°C",
         helpMarkdown: nil,
+        showsThermalStatus: true,
         schemaBuilder: { _ in "temperature" },
         seriesBuilder: { _ in
             [
@@ -385,6 +388,14 @@ private enum MetricsChartDefinitions {
                     kind: .line,
                     lineWidth: 1.5,
                     chartValue: { $0.temp.gpuTempAvg },
+                    detailsFormatter: Formatters.temperature
+                ),
+                MetricsSeriesDescriptor(
+                    title: "BAT",
+                    color: .systemGreen,
+                    kind: .line,
+                    lineWidth: 1.5,
+                    chartValue: { _ in AppDependencies.shared.batteryTemperatureCelsius ?? .nan },
                     detailsFormatter: Formatters.temperature
                 ),
             ]
@@ -731,6 +742,10 @@ struct ContentView: View {
                 .padding(.leading, -7)
                 .padding(.trailing, -5)
                 .padding(.vertical, -4)
+            if !batteryState.batteryStatus.isOnACPower {
+                BatteryTimeRemainingLabel(seconds: batteryState.estimatedSecondsRemaining)
+                    .foregroundStyle(.secondary)
+            }
         }
 
         BatteryStatusLabel(state: batteryTrackerService.runtimeState, trackerRunning: batteryTrackerService.status == .running)

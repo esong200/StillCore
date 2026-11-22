@@ -29,10 +29,73 @@ struct MetricsChartDefinition {
     let unitLabel: String
     let helpMarkdown: String?
     var showsSampleTime = false
+    var showsThermalStatus = false
     let schemaBuilder: (Metrics?) -> AnyHashable
     let seriesBuilder: (Metrics?) -> [MetricsSeriesDescriptor]
 }
 
+
+private struct ThermalStatusLabel: View {
+    @State private var thermalState = ProcessInfo.processInfo.thermalState
+
+    private var title: LocalizedStringKey {
+        switch thermalState {
+        case .nominal: "Nominal"
+        case .fair: "Fair"
+        case .serious: "Serious"
+        case .critical: "Critical"
+        @unknown default: "Unknown"
+        }
+    }
+
+    private var color: Color {
+        switch thermalState {
+        case .nominal: .green
+        case .fair: .yellow
+        case .serious: .orange
+        case .critical: .red
+        @unknown default: .secondary
+        }
+    }
+
+    private var explanation: LocalizedStringKey {
+        switch thermalState {
+        case .nominal:
+            "macOS reports normal thermal conditions. This does not rule out individual CPU or GPU limits."
+        case .fair:
+            "macOS reports slightly elevated thermal conditions and may reduce background work."
+        case .serious:
+            "macOS reports high thermal pressure and is reducing performance to cool the system."
+        case .critical:
+            "macOS reports critical thermal pressure with a significant impact on performance."
+        @unknown default:
+            "macOS reported an unrecognized thermal state."
+        }
+    }
+
+    var body: some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.12), in: Capsule())
+            .help(Text(explanation))
+            .accessibilityLabel(Text("Thermal status"))
+            .accessibilityValue(Text(title))
+            .task {
+                // Reading thermalState first enables the system's change notifications.
+                thermalState = ProcessInfo.processInfo.thermalState
+                let changes = NotificationCenter.default.notifications(
+                    named: ProcessInfo.thermalStateDidChangeNotification
+                ).map { _ in () }
+                for await _ in changes {
+                    if Task.isCancelled { break }
+                    thermalState = ProcessInfo.processInfo.thermalState
+                }
+            }
+    }
+}
 
 private struct MaterializedMetricsSample {
     struct SeriesValue {
@@ -157,6 +220,8 @@ final class ChartDataController {
         series: [MetricsSeriesDescriptor]
     ) {
         for (index, _) in series.enumerated() {
+            // Missing sensors must not introduce zero or non-finite chart points.
+            if !sample.values[index].chartValue.isFinite { continue }
             dataSets[index].append(
                 ChartDataEntry(
                     x: Double(sample.sampleID),
@@ -217,6 +282,20 @@ final class ChartDataController {
             dataSet.removeFirst(max(0, dataSet.count - 1))
         }
         updateSinglePointAppearance(series: series)
+    }
+
+    func visibleYMin(fromX: Double, toX: Double, fallback: Double) -> Double {
+        var yMin = fallback
+
+        for dataSet in dataSets where dataSet.isVisible {
+            for entry in dataSet.entries where entry.x >= fromX && entry.x <= toX {
+                if entry.y.isFinite {
+                    yMin = min(yMin, entry.y)
+                }
+            }
+        }
+
+        return yMin
     }
 
     func visibleYMax(fromX: Double, toX: Double, fallback: Double) -> Double {
@@ -441,9 +520,11 @@ final class MetricsLineChartView: LineChartView {
     func getMaterializedPointsSlice(x: Double? = nil) -> [MaterializedChartPoint] {
         guard let data else { return [] }
         var slice: [MaterializedChartPoint] = []
+        // Use one sample time so an unavailable sensor does not show a stale value.
+        let sampleX = x ?? data.dataSets.compactMap { ($0 as? LineChartDataSet)?.last?.x }.max()
 
         for case let dataSet as LineChartDataSet in data.dataSets {
-            let x = x ?? dataSet.last?.x
+            let x = sampleX
             guard let x else { continue }
 
             for entry in dataSet.entriesForXValue(x) {
@@ -641,10 +722,19 @@ private struct MetricsDGChartView: NSViewRepresentable {
             toX: visibleMaxX,
             fallback: yStart
         )
-        let visibleHeight = max(0, rawVisibleYMax - yStart)
-        chartView.leftAxis.axisMinimum = yStart
+        let rawVisibleYMin = controller.visibleYMin(
+            fromX: visibleMinX,
+            toX: visibleMaxX,
+            fallback: yStart
+        )
+        // Expand below the preferred baseline for cooler sensors such as the battery.
+        // Rounded bounds leave breathing room without following every tiny fluctuation.
+        let visibleYStart = rawVisibleYMin < yStart
+            ? floor((rawVisibleYMin - 2) / 5) * 5 : yStart
+        let visibleHeight = max(0, rawVisibleYMax - visibleYStart)
+        chartView.leftAxis.axisMinimum = visibleYStart
         chartView.leftAxis.axisMaximum =
-            chartView.yMaxStabilizer.update(height: visibleHeight) + yStart
+            chartView.yMaxStabilizer.update(height: visibleHeight) + visibleYStart
     }
 
 }
@@ -749,6 +839,10 @@ struct MetricsChartSection: View {
             Spacer()
             Text(definition.title)
                 .font(.headline)
+            if definition.showsThermalStatus {
+                ThermalStatusLabel()
+                    .padding(.horizontal, 3)
+            }
             if let helpMarkdown = definition.helpMarkdown {
                 Button {
                     isHelpPresented.toggle()

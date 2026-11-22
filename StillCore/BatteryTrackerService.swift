@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import IOKit.ps
 import ServiceManagement
 
 enum BatteryChargeStatus {
@@ -14,6 +15,7 @@ struct BatteryRuntimeState {
     var batteryTrackerState: BatteryTrackerState?
     var batteryStatus: BatteryStatus
     var dischargeScale: BatteryDischargeScale?
+    var estimatedSecondsRemaining: TimeInterval? = nil
 
     var currentPercent: Double {
         if let percent = dischargeScale?.percent(chargeMah: batteryStatus.currentCapacityMah, fullMah: batteryStatus.maxCapacityMah) {
@@ -138,10 +140,14 @@ final class BatteryTrackerService: HelperService {
             if runtimeState == nil || battery.updateTime == nil || battery.updateTime != runtimeState?.batteryStatus.updateTime {
                 scale = BatteryDischargeScale.read()
             }
+            let timeRemaining = IOPSGetTimeRemainingEstimate()
             runtimeState = BatteryRuntimeState(
                 batteryTrackerState: batteryTrackerState,
                 batteryStatus: battery,
-                dischargeScale: scale
+                dischargeScale: scale,
+                // Negative values mean the estimate is unknown or power is unlimited.
+                estimatedSecondsRemaining: !battery.isOnACPower && timeRemaining.isFinite && timeRemaining >= 0
+                    ? timeRemaining : nil
             )
         } catch {
             runtimeState = nil

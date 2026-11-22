@@ -91,6 +91,28 @@ struct BatteryStatus {
         )
     }
 
+    /// Reads the live pack temperature independently of battery capacity reporting.
+    static func readTemperatureCelsius() -> Float? {
+        // Newer systems expose temperature on the pack; older systems use the battery.
+        for serviceName in ["AppleSmartBatteryPack", "AppleSmartBattery"] {
+            let entry = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching(serviceName))
+            if entry != IO_OBJECT_NULL {
+                defer { IOObjectRelease(entry) }
+                let batteryData = IORegistryEntryCreateCFProperty(
+                    entry, "BatteryData" as CFString, kCFAllocatorDefault, 0
+                )?.takeRetainedValue() as? [String: Any]
+                let raw = intProperty(entry: entry, key: "Temperature")
+                    ?? batteryData?["Temperature"] as? Int
+                    ?? batteryData?["VirtualTemperature"] as? Int
+                if let raw, raw > 0, raw <= 10_000 {
+                    // These registry values are in hundredths of a degree Celsius.
+                    return Float(raw) / 100
+                }
+            }
+        }
+        return nil
+    }
+
     private static func openBatteryEntry() -> io_registry_entry_t {
         var iterator = io_iterator_t()
         let result = IOServiceGetMatchingServices(
