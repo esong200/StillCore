@@ -1,6 +1,37 @@
 import SwiftUI
 import AppKit
 
+struct ChargerPowerLabel: View {
+    let maximumWatts: Int?
+    let chargingWatts: Double?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "powerplug")
+                .accessibilityHidden(true)
+            if let maximumWatts {
+                Text("Charger \(maximumWatts.formatted()) W max")
+                    .help("Maximum charger wattage reported by macOS for the current connection. The cable and connection can limit this below the adapter’s printed rating.")
+            } else {
+                Text("Charger — W max")
+                    .help("Charger wattage is unavailable.")
+            }
+            Text("·")
+                .accessibilityHidden(true)
+            if let chargingWatts {
+                Text("Charging \(chargingWatts.formatted(.number.precision(.fractionLength(1)))) W")
+                    .help("Net battery power calculated from voltage and current. Positive means charging; negative means the battery is supplying power because the Mac is using more than the charger supplies.")
+            } else {
+                Text("Charging — W")
+                    .help("Battery charging power is unavailable.")
+            }
+        }
+        .font(.caption)
+        .monospacedDigit()
+        .foregroundStyle(.secondary)
+    }
+}
+
 struct BatteryTimeRemainingLabel: View {
     let seconds: TimeInterval?
 

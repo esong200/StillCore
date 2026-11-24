@@ -25,6 +25,8 @@ struct BatteryStatus {
     var isCharging: Bool
     var isFullyCharged: Bool
     var powerSaveMode: Bool
+    var chargerMaxWatts: Int? = nil
+    var chargingWatts: Double? = nil
 
     static var isAvailable: Bool {
         let entry = openBatteryEntry()
@@ -75,6 +77,24 @@ struct BatteryStatus {
             throw BatteryStatusError.unavailable
         }
 
+        var chargerMaxWatts: Int?
+        var chargingWatts: Double?
+        if isOnACPower {
+            let adapter = IORegistryEntryCreateCFProperty(
+                entry, "AdapterDetails" as CFString, kCFAllocatorDefault, 0
+            )?.takeRetainedValue() as? [String: Any]
+            if let watts = adapter?["Watts"] as? Int, watts > 0 {
+                chargerMaxWatts = watts
+            }
+            if let millivolts = intProperty(entry: entry, key: "Voltage"), millivolts > 0,
+               let milliamps = signedCurrentProperty(entry: entry, key: "InstantAmperage")
+                    ?? signedCurrentProperty(entry: entry, key: "Amperage") {
+                // Keep the signed battery current even when IsCharging is false:
+                // negative power is the shortfall being supplied by the battery.
+                chargingWatts = Double(millivolts) * Double(milliamps) / 1_000_000
+            }
+        }
+
         return BatteryStatus(
             updateTime: intProperty(entry: entry, key: "UpdateTime"),
             rawCurrentCapacity: rawCurrent,
@@ -87,7 +107,9 @@ struct BatteryStatus {
             isOnACPower: isOnACPower,
             isCharging: isCharging,
             isFullyCharged: isFullyCharged,
-            powerSaveMode: ProcessInfo.processInfo.isLowPowerModeEnabled
+            powerSaveMode: ProcessInfo.processInfo.isLowPowerModeEnabled,
+            chargerMaxWatts: chargerMaxWatts,
+            chargingWatts: chargingWatts
         )
     }
 
@@ -125,6 +147,17 @@ struct BatteryStatus {
         }
         defer { IOObjectRelease(iterator) }
         return IOIteratorNext(iterator)
+    }
+
+    private static func signedCurrentProperty(entry: io_registry_entry_t, key: String) -> Int? {
+        if let value = IORegistryEntryCreateCFProperty(
+            entry, key as CFString, kCFAllocatorDefault, 0
+        )?.takeRetainedValue(), CFGetTypeID(value) == CFNumberGetTypeID(),
+           let number = value as? NSNumber {
+            // Some drivers expose negative current as an unsigned 64-bit bit pattern.
+            return number.intValue
+        }
+        return nil
     }
 
     private static func intProperty(entry: io_registry_entry_t, key: String) -> Int? {

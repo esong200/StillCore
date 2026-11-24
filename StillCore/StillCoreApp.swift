@@ -698,6 +698,13 @@ struct ContentView: View {
                 }
                 .frame(height: BatteryIndicatorImage.size.height)
             }
+            if let battery = batteryTrackerService.runtimeState?.batteryStatus, battery.isOnACPower {
+                ChargerPowerLabel(
+                    maximumWatts: battery.chargerMaxWatts,
+                    chargingWatts: battery.chargingWatts
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
